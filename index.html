@@ -1,11 +1,158 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Jazz Drum Practice</title>
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jazz Drum Practice</title>
+  <style>
+    body {font-family:sans-serif;margin:0;padding:1rem;background:#f9f9f9;text-align:center}
+    #container{max-width:400px;margin:0 auto}
+    .pattern-group{display:grid;grid-template-columns:repeat(4,1fr);gap:.25rem;border:1px solid #bbb;border-radius:.25rem;padding:.5rem;margin:.25rem 0}
+    .cell{text-align:center}
+    .beat-label{font-size:.7rem;color:#666}
+    .beat-hit{font-size:1.25rem;font-weight:700}
+    .active{background:#fca5a5;border-radius:.25rem}
+    button{padding:.5rem 1rem;border:none;border-radius:.25rem;color:#fff;font-weight:600;cursor:pointer}
+    .blue{background:#3b82f6}.blue:hover{background:#2563eb}
+    .green{background:#22c55e}.green:hover{background:#16a34a}
+    .yellow{background:#facc15;color:#000}.yellow:hover{background:#eab308}
+    .red{background:#ef4444}.red:hover{background:#dc2626}
+    input[type=range]{width:100%}
+    table{width:100%;font-size:.8rem;border-collapse:collapse;margin-top:1rem}
+    th,td{border:1px solid #ccc;padding:.25rem}
+    th{background:#f3f4f6}
+  </style>
+</head>
+<body>
+<div id="container">
+  <h1>爵士鼓四連音練習</h1>
+  <div>練習時間：<span id="timer">00:00</span></div>
+  <div style="margin:1rem 0">
+    <label for="bpm">BPM（每分鐘拍數）</label>
+    <input type="range" id="bpm" min="60" max="200" value="100" />
+    <div id="bpmDisplay">100 BPM</div>
+  </div>
+  <div id="pattern"></div>
+  <div style="display:flex;flex-direction:column;gap:.5rem;margin:1rem 0">
+    <button id="next" class="blue">Next</button>
+    <button id="play" class="green">Play</button>
+    <button id="metro" class="yellow">節拍器</button>
+  </div>
+  <div id="historyContainer" style="display:none">
+    <h3>練習紀錄</h3>
+    <table id="historyTable">
+      <thead>
+        <tr><th>類型</th><th>時間</th><th>手法</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+<script>
+(function(){
+  const patternEl = document.getElementById('pattern');
+  const timerEl = document.getElementById('timer');
+  const bpmSlider = document.getElementById('bpm');
+  const bpmDisplay = document.getElementById('bpmDisplay');
+  const nextBtn = document.getElementById('next');
+  const playBtn = document.getElementById('play');
+  const metroBtn = document.getElementById('metro');
+  const historyContainer=document.getElementById('historyContainer');
+  const historyTable=document.querySelector('#historyTable tbody');
+
+  let pattern = [];
+  let bpm = +bpmSlider.value;
+  let currentBeat = null;
+  let timerInterval=null,startTime=null,elapsed=0;
+  let metroInterval=null,metroOn=false;
+  const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+
+  function generatePattern(){
+    const hands=['R','L'];
+    let last='',count=0;pattern=[];
+    for(let i=0;i<16;i++){
+      const opts=hands.filter(h=>h!==last||count<2);
+      const pick=opts[Math.floor(Math.random()*opts.length)];
+      pattern.push(pick);
+      if(pick===last){count++;}else{last=pick;count=1;}
+    }
+  }
+
+  function renderPattern(){
+    patternEl.innerHTML='';
+    const labels=['1','e','&','a','2','e','&','a','3','e','&','a','4','e','&','a'];
+    for(let g=0;g<4;g++){
+      const group=document.createElement('div');group.className='pattern-group';
+      for(let i=0;i<4;i++){
+        const idx=g*4+i;
+        const cell=document.createElement('div');cell.className='cell';
+        if(idx===currentBeat)cell.classList.add('active');
+        cell.innerHTML=`<div class='beat-label'>${labels[idx]}</div><div class='beat-hit'>${pattern[idx]}</div>`;
+        group.appendChild(cell);
+      }
+      patternEl.appendChild(group);
+    }
+  }
+
+  function updateTimer(){
+    elapsed=Math.floor((Date.now()-startTime)/1000);
+    const m=String(Math.floor(elapsed/60)).padStart(2,'0');
+    const s=String(elapsed%60).padStart(2,'0');
+    timerEl.textContent=`${m}:${s}`;
+  }
+
+  function startTimer(){startTime=Date.now();timerInterval=setInterval(updateTimer,1000);}
+  function stopTimer(){clearInterval(timerInterval);startTime=null;elapsed=0;updateTimer();}
+
+  function recordSession(type){
+    if(elapsed===0) return;
+    historyContainer.style.display='block';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${type}</td><td>${timerEl.textContent}</td><td style='font-family:monospace'>${pattern.join(' ')}</td>`;
+    historyTable.appendChild(tr);
+  }
+
+  function playSound(high){
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.type='sine';
+    osc.frequency.value=high?1000:700;
+    gain.gain.value=0.3;
+    osc.connect(gain);gain.connect(audioCtx.destination);
+    osc.start();osc.stop(audioCtx.currentTime+0.1);
+  }
+
+  function playPattern(){
+    if(startTime) return; // already playing
+    startTimer();
+    const interval=(60/bpm)*1000/4;
+    let idx=0;
+    (function loop(){
+      currentBeat=idx;renderPattern();playSound(idx%4===0);
+      idx++; if(idx<16){setTimeout(loop,interval);}else{currentBeat=null;renderPattern();recordSession('Play');stopTimer();}
+    })();
+  }
+
+  function toggleMetronome(){
+    if(metroOn){
+      clearInterval(metroInterval);metroOn=false;metroBtn.classList.remove('red');metroBtn.textContent='節拍器';
+      recordSession('Metronome');stopTimer();currentBeat=null;renderPattern();return;
+    }
+    startTimer();metroOn=true;metroBtn.classList.add('red');metroBtn.textContent='停止';
+    let count=0;const interval=(60/bpm)*1000/4;
+    metroInterval=setInterval(()=>{
+      currentBeat=count%16;renderPattern();playSound(count%4===0);count++;},interval);
+  }
+
+  // ── 事件 ──────────────────────
+  bpmSlider.oninput=e=>{bpm=+e.target.value;bpmDisplay.textContent=`${bpm} BPM`;if(metroOn){toggleMetronome();toggleMetronome();}}
+  nextBtn.onclick=()=>{generatePattern();renderPattern();}
+  playBtn.onclick=playPattern;
+  metroBtn.onclick=toggleMetronome;
+
+  // 初始化
+  generatePattern();renderPattern();updateTimer();
+})();
+</script>
+</body>
 </html>
